@@ -1,0 +1,130 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: inventoryItems
+    // Fields: toolId, merk, toolDesc, typeSize, qty, condition, lastInspectionDate
+    //
+    // Collection: toolboxes
+    // Fields: idToolbox, name, nrp, section, toolCount, badCount, brokenCount, naCount, lastInspectionDate
+    //
+    // Collection: loans
+    // Fields: toolName, typeSize, borrowerName, section, shift, borrowDate, returnDate, status
+    //
+    // Collection: dailyInspections
+    // Fields: date, toolboxId, inspector, items (array of {id, status})
+    //
+    // Collection: toolroomInspections
+    // Fields: date, inspector, items (array of {inventoryItemId, status})
+    //
+    // Collection: maintenanceLogs
+    // Fields: toolName, date, description, cost, technician
+    //
+    // Collection: orders
+    // Fields: date, merk, toolDesc, typeSize, qty, vendor, pr, po, status, remarks
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email == "nasori.bm37@gmail.com" && isEmailVerified());
+    }
+
+    function isStaff() {
+      let staffEmails = ["toolkeeper@toolmanagement.com", "glplanner@toolmanagement.com"];
+      return isAuthenticated() && (request.auth.token.email in staffEmails || isSuperAdmin());
+    }
+
+    function isValidString(val, min, max) {
+      return val is string && val.size() >= min && val.size() <= max;
+    }
+
+    function isValidNumber(val, min, max) {
+      return val is number && val >= min && val <= max;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidLoan(data) {
+      return data.keys().hasAll(['toolName', 'borrowerName', 'status']) &&
+             isValidString(data.toolName, 1, 100) &&
+             isValidString(data.borrowerName, 1, 100) &&
+             data.status in ['active', 'returned'];
+    }
+
+    function isValidInspection(data) {
+      return data.keys().hasAll(['date', 'inspector', 'items']) &&
+             isValidString(data.date, 1, 50) &&
+             isValidString(data.inspector, 1, 100) &&
+             data.items is list;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    
+    // Master Data - Staff & Superadmin for writes, Authenticated for reads
+    match /inventoryItems/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
+    }
+
+    match /toolboxes/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
+    }
+
+    match /maintenanceLogs/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
+    }
+
+    match /orders/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
+    }
+
+    // Operational Data - Staff can create/update
+    match /loans/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isStaff() && isValidLoan(request.resource.data);
+      allow update: if isStaff() && isValidLoan(request.resource.data);
+      allow delete: if isSuperAdmin();
+    }
+
+    match /dailyInspections/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isStaff() && isValidInspection(request.resource.data);
+      allow update, delete: if isSuperAdmin();
+    }
+
+    match /toolroomInspections/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isStaff() && isValidInspection(request.resource.data);
+      allow update, delete: if isSuperAdmin();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

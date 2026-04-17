@@ -1,0 +1,138 @@
+{
+  "entities": {
+    "Tool": {
+      "title": "Tool",
+      "description": "A tool in the inventory",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "brand": { "type": "string" },
+        "serialNumber": { "type": "string" },
+        "status": { "type": "string", "enum": ["available", "borrowed", "maintenance", "lost"] },
+        "location": { "type": "string" },
+        "purchaseDate": { "type": "string" },
+        "lastMaintenance": { "type": "string" },
+        "nextMaintenance": { "type": "string" },
+        "imageUrl": { "type": "string" }
+      },
+      "required": ["id", "name", "status"]
+    },
+    "Loan": {
+      "title": "Loan",
+      "description": "A tool loan record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "toolId": { "type": "string" },
+        "toolName": { "type": "string" },
+        "typeSize": { "type": "string" },
+        "borrowerName": { "type": "string" },
+        "section": { "type": "string" },
+        "shift": { "type": "string", "enum": ["Day", "Night"] },
+        "borrowDate": { "type": "string" },
+        "returnDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "returned"] }
+      },
+      "required": ["id", "toolName", "borrowerName", "status"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "An item in the toolroom inventory",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "toolId": { "type": "string" },
+        "category": { "type": "string" },
+        "merk": { "type": "string" },
+        "toolDesc": { "type": "string" },
+        "typeSize": { "type": "string" },
+        "qty": { "type": "number" },
+        "condition": { "type": "string" },
+        "lastInspectionDate": { "type": "string" }
+      }
+    },
+    "Toolbox": {
+      "title": "Toolbox",
+      "description": "A mechanic's toolbox",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "idToolbox": { "type": "string" },
+        "name": { "type": "string" },
+        "nrp": { "type": "string" },
+        "section": { "type": "string" },
+        "toolCount": { "type": "number" },
+        "badCount": { "type": "number" },
+        "brokenCount": { "type": "number" },
+        "naCount": { "type": "number" },
+        "lastInspectionDate": { "type": "string" }
+      }
+    },
+    "MaintenanceLog": {
+      "title": "MaintenanceLog",
+      "description": "A maintenance record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "toolName": { "type": "string" },
+        "date": { "type": "string" },
+        "description": { "type": "string" },
+        "cost": { "type": "number" },
+        "technician": { "type": "string" }
+      }
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A tool order record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "merk": { "type": "string" },
+        "toolDesc": { "type": "string" },
+        "typeSize": { "type": "string" },
+        "qty": { "type": "number" },
+        "vendor": { "type": "string" },
+        "pr": { "type": "string" },
+        "po": { "type": "string" },
+        "status": { "type": "string" },
+        "remarks": { "type": "string" }
+      }
+    },
+    "DailyInspection": {
+      "title": "DailyInspection",
+      "description": "A daily toolbox inspection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "toolboxId": { "type": "string" },
+        "inspector": { "type": "string" },
+        "items": { "type": "array" }
+      }
+    },
+    "ToolroomInspection": {
+      "title": "ToolroomInspection",
+      "description": "A toolroom inspection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "inspector": { "type": "string" },
+        "items": { "type": "array" }
+      }
+    }
+  },
+  "firestore": {
+    "/tools": { "schema": "Tool", "description": "Global tools inventory" },
+    "/loans": { "schema": "Loan", "description": "Tool loan records" },
+    "/inventoryItems": { "schema": "InventoryItem", "description": "Toolroom inventory items" },
+    "/toolboxes": { "schema": "Toolbox", "description": "Mechanic toolboxes" },
+    "/maintenanceLogs": { "schema": "MaintenanceLog", "description": "Maintenance history" },
+    "/orders": { "schema": "Order", "description": "Tool orders" },
+    "/dailyInspections": { "schema": "DailyInspection", "description": "Daily toolbox inspections" },
+    "/toolroomInspections": { "schema": "ToolroomInspection", "description": "Toolroom inspections" }
+  }
+}
