@@ -1,5 +1,6 @@
 {
   "name": "Tool Management System",
-  "description": "Sistem Manajemen Tool Profesional untuk inventaris, peminjaman, dan pemeliharaan.",
-  "requestFramePermissions": []
+  "description": "Sistem Manajemen Tool Profesional untuk inventaris aset, peminjaman, dan pemeliharaan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
 }

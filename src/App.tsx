@@ -51,7 +51,9 @@ import {
   Printer,
   FileText,
   Pencil,
-  Trash2
+  Trash2,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -85,6 +87,10 @@ export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+
+  useEffect(() => {
+    document.title = "Tool Management System";
+  }, []);
   const [loans, setLoans] = useState<Loan[]>([]);
   const [dailyInspections, setDailyInspections] = useState<DailyInspection[]>([]);
   const [toolroomInspections, setToolroomInspections] = useState<ToolroomInspection[]>([]);
@@ -93,6 +99,7 @@ export default function App() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [progressOrders, setProgressOrders] = useState<ProgressOrder[]>([]);
   
+  const [loanStatusFilter, setLoanStatusFilter] = useState<'all' | 'active' | 'returned'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMasterDataOpen, setIsMasterDataOpen] = useState(false);
@@ -211,6 +218,7 @@ export default function App() {
 
   const [selectedToolboxId, setSelectedToolboxId] = useState<string>('');
   const [inspectionResults, setInspectionResults] = useState<Record<string, InspectionStatus>>({});
+  const [inspectionNotes, setInspectionNotes] = useState<Record<string, string>>({});
 
   const [newLoan, setNewLoan] = useState<Partial<Loan>>({
     status: 'active',
@@ -232,7 +240,7 @@ export default function App() {
     technician: ''
   });
 
-  const [toolboxDetails, setToolboxDetails] = useState(INITIAL_TOOLBOX_DETAILS);
+  const [toolboxDetails, setToolboxDetails] = useState<ToolboxDetail[]>(INITIAL_TOOLBOX_DETAILS as ToolboxDetail[]);
   const [editingToolboxId, setEditingToolboxId] = useState<string | null>(null);
   const [editingInventoryId, setEditingInventoryId] = useState<string | null>(null);
 
@@ -242,7 +250,6 @@ export default function App() {
     nrp: '', 
     section: 'TRACK MECHANIC',
     badCount: 0,
-    brokenCount: 0,
     naCount: 0
   });
   const [newInventoryItem, setNewInventoryItem] = useState({ 
@@ -255,6 +262,30 @@ export default function App() {
   });
   const [newDetailToolbox, setNewDetailToolbox] = useState<Omit<ToolboxDetail, 'id'>>({ merk: '', toolDesc: '', typeSize: '', qty: 1 });
   const [editingDetailId, setEditingDetailId] = useState<string | null>(null);
+
+  const sortedLoans = useMemo(() => {
+    return [...loans].sort((a, b) => {
+      try {
+        const timeA = parseISO(a.updatedAt || a.borrowDate).getTime();
+        const timeB = parseISO(b.updatedAt || b.borrowDate).getTime();
+        return timeB - timeA;
+      } catch (e) {
+        return 0;
+      }
+    });
+  }, [loans]);
+
+  const processedLoans = useMemo(() => {
+    let list = sortedLoans;
+    
+    // Apply status filter
+    if (loanStatusFilter !== 'all') {
+      list = list.filter(loan => loan.status === loanStatusFilter);
+    }
+
+    return list;
+  }, [sortedLoans, loanStatusFilter]);
+
   const [newOrder, setNewOrder] = useState({
     date: new Date().toISOString().split('T')[0],
     merk: '',
@@ -399,7 +430,6 @@ export default function App() {
     const totalBroken = invStats.broken + tbStats.broken;
     const totalNA = invStats.na + tbStats.na;
     const good = invStats.good + tbStats.good;
-    
     const activeInventoryTotal = inventoryTotal - invStats.na;
     const activeToolboxesTotal = toolboxesTotal - tbStats.na;
     const total = activeInventoryTotal + activeToolboxesTotal;
@@ -412,7 +442,7 @@ export default function App() {
       { name: 'Good', value: good, color: '#22c55e' },
       { name: 'Bad', value: totalBad, color: '#f59e0b' },
       { name: 'Broken', value: totalBroken, color: '#ef4444' },
-      { name: 'N/A', value: totalNA, color: '#64748b' },
+      { name: 'N/A', value: totalNA, color: '#3b82f6' },
     ];
 
     const categoryData = inventoryItems
@@ -519,7 +549,7 @@ export default function App() {
       toolboxesTotal: activeToolboxesTotal,
       available, 
       borrowed, 
-      bad: totalBad,
+      bad: totalBad, 
       broken: totalBroken,
       na: totalNA,
       maintenance: maintenanceCount, 
@@ -558,23 +588,46 @@ export default function App() {
     }).sort((a, b) => a.idToolbox.localeCompare(b.idToolbox, undefined, { numeric: true, sensitivity: 'base' }));
   }, [toolboxes, dailyInspections]);
 
+  const [showDamagedInventory, setShowDamagedInventory] = useState(false);
+  const [showDamagedDetails, setShowDamagedDetails] = useState(false);
+
   const inventoryWithLastInspection = useMemo(() => {
     return inventoryItems.map(item => {
       const inspections = toolroomInspections
         .filter(ins => ins.items.some(i => i.inventoryItemId === item.id))
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       
-      const lastStatus = inspections.length > 0 
-        ? inspections[0].items.find(i => i.inventoryItemId === item.id)?.status 
-        : 'Good';
+      const lastInspectionItem = inspections.length > 0 
+        ? inspections[0].items.find(i => i.inventoryItemId === item.id)
+        : null;
 
       return {
         ...item,
         lastInspectionDate: inspections.length > 0 ? inspections[0].date : undefined,
-        lastStatus
+        lastStatus: lastInspectionItem?.status || 'Good',
+        lastNotes: lastInspectionItem?.notes || ''
       };
     }).sort((a, b) => a.toolId.localeCompare(b.toolId, undefined, { numeric: true, sensitivity: 'base' }));
   }, [inventoryItems, toolroomInspections]);
+
+  const toolboxDetailsWithLastInspection = useMemo(() => {
+    return toolboxDetails.map(detail => {
+      // Find all inspections that include this item
+      const inspections = dailyInspections
+        .filter(ins => ins.items.some(i => i.toolDetailId === detail.id))
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      const lastInspectionItem = inspections.length > 0 
+        ? inspections[0].items.find(i => i.toolDetailId === detail.id)
+        : null;
+
+      return {
+        ...detail,
+        lastStatus: lastInspectionItem?.status || 'Good',
+        lastNotes: lastInspectionItem?.notes || ''
+      };
+    });
+  }, [toolboxDetails, dailyInspections]);
 
   const handleAddLoan = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -586,6 +639,7 @@ export default function App() {
       section: newLoan.section || 'Track',
       shift: (newLoan.shift as 'Day' | 'Night') || 'Day',
       borrowDate: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       status: 'active',
     };
 
@@ -676,7 +730,8 @@ export default function App() {
     try {
       await updateDoc(doc(db, 'loans', loanId), {
         status: 'returned',
-        returnDate: new Date().toISOString()
+        returnDate: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       });
 
       // Update inventory quantity if toolId exists
@@ -708,7 +763,6 @@ export default function App() {
       section: newToolbox.section,
       toolCount: toolboxDetails.length,
       badCount: newToolbox.badCount,
-      brokenCount: newToolbox.brokenCount,
       naCount: newToolbox.naCount
     };
 
@@ -726,7 +780,6 @@ export default function App() {
         nrp: '', 
         section: 'TRACK MECHANIC',
         badCount: 0,
-        brokenCount: 0,
         naCount: 0
       });
       setSuccessDialog({
@@ -747,7 +800,6 @@ export default function App() {
       nrp: toolbox.nrp,
       section: toolbox.section,
       badCount: toolbox.badCount || 0,
-      brokenCount: toolbox.brokenCount || 0,
       naCount: toolbox.naCount || 0
     });
     setEditingToolboxId(toolbox.id);
@@ -1076,12 +1128,14 @@ export default function App() {
       items: toolboxDetails
         .map(d => ({
           toolDetailId: d.id,
-          status: inspectionResults[d.id] || 'Good'
+          status: inspectionResults[d.id] || 'Good',
+          notes: inspectionNotes[d.id] || ''
         }))
     };
     try {
       await addDoc(collection(db, 'dailyInspections'), newInspection);
       setInspectionResults({});
+      setInspectionNotes({});
       setSelectedToolboxId('');
       setSuccessDialog({
         isOpen: true,
@@ -1149,7 +1203,7 @@ export default function App() {
           const status = data.cell.raw;
           if (status === 'Bad') data.cell.styles.textColor = [245, 158, 11];
           if (status === 'Broken') data.cell.styles.textColor = [239, 68, 68];
-          if (status === 'N/A') data.cell.styles.textColor = [100, 116, 139];
+          if (status === 'N/A') data.cell.styles.textColor = [59, 130, 246];
           if (status === 'Good') data.cell.styles.textColor = [34, 197, 94];
         }
       }
@@ -1219,7 +1273,7 @@ export default function App() {
           const status = data.cell.raw;
           if (status === 'Bad') data.cell.styles.textColor = [245, 158, 11];
           if (status === 'Broken') data.cell.styles.textColor = [239, 68, 68];
-          if (status === 'N/A') data.cell.styles.textColor = [100, 116, 139];
+          if (status === 'N/A') data.cell.styles.textColor = [59, 130, 246];
           if (status === 'Good') data.cell.styles.textColor = [34, 197, 94];
         }
       }
@@ -1250,12 +1304,14 @@ export default function App() {
       inspector: user.displayName || user.email || 'Admin User',
       items: inventoryWithLastInspection.map(i => ({
         inventoryItemId: i.id,
-        status: inspectionResults[i.id] || 'Good'
+        status: inspectionResults[i.id] || 'Good',
+        notes: inspectionNotes[i.id] || ''
       }))
     };
     try {
       await addDoc(collection(db, 'toolroomInspections'), newInspection);
       setInspectionResults({});
+      setInspectionNotes({});
       setSuccessDialog({
         isOpen: true,
         title: 'Success',
@@ -1330,7 +1386,7 @@ export default function App() {
           </div>
 
           <nav className="flex-1 px-4 space-y-2 mt-4">
-            <NavItem icon={<LayoutDashboard className="w-5 h-5" />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => handleNavClick('dashboard')} collapsed={!isSidebarOpen} />
+            <NavItem key="dashboard" icon={<LayoutDashboard className="w-5 h-5" />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => handleNavClick('dashboard')} collapsed={!isSidebarOpen} />
             
             <div className="pt-2">
               <button 
@@ -1355,16 +1411,16 @@ export default function App() {
                     exit={{ height: 0, opacity: 0 }}
                     className="overflow-hidden pl-4 space-y-1 mt-1"
                   >
-                    <NavItem icon={<Calendar className="w-4 h-4" />} label="Daily Inspection" active={activeTab === 'inspection-daily'} onClick={() => handleNavClick('inspection-daily')} collapsed={false} />
-                    <NavItem icon={<Package className="w-4 h-4" />} label="Inspection Toolroom" active={activeTab === 'inspection-toolroom'} onClick={() => handleNavClick('inspection-toolroom')} collapsed={false} />
+                    <NavItem key="inspection-daily" icon={<Calendar className="w-4 h-4" />} label="Daily Inspection" active={activeTab === 'inspection-daily'} onClick={() => handleNavClick('inspection-daily')} collapsed={false} />
+                    <NavItem key="inspection-toolroom" icon={<Package className="w-4 h-4" />} label="Inspection Toolroom" active={activeTab === 'inspection-toolroom'} onClick={() => handleNavClick('inspection-toolroom')} collapsed={false} />
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
 
-            <NavItem icon={<ArrowRightLeft className="w-5 h-5" />} label="Loans" active={activeTab === 'loans'} onClick={() => handleNavClick('loans')} collapsed={!isSidebarOpen} />
-            <NavItem icon={<ShoppingCart className="w-5 h-5" />} label="Order Tool" active={activeTab === 'progress-order'} onClick={() => handleNavClick('progress-order')} collapsed={!isSidebarOpen} />
-            <NavItem icon={<ShieldCheck className="w-5 h-5" />} label="Maintenance" active={activeTab === 'maintenance'} onClick={() => handleNavClick('maintenance')} collapsed={!isSidebarOpen} />
+            <NavItem key="loans" icon={<ArrowRightLeft className="w-5 h-5" />} label="Recent Loans" active={activeTab === 'loans'} onClick={() => handleNavClick('loans')} collapsed={!isSidebarOpen} />
+            <NavItem key="progress-order" icon={<ShoppingCart className="w-5 h-5" />} label="Order Tool" active={activeTab === 'progress-order'} onClick={() => handleNavClick('progress-order')} collapsed={!isSidebarOpen} />
+            <NavItem key="maintenance" icon={<ShieldCheck className="w-5 h-5" />} label="Maintenance" active={activeTab === 'maintenance'} onClick={() => handleNavClick('maintenance')} collapsed={!isSidebarOpen} />
             
             <div className="pt-2">
               <button 
@@ -1389,16 +1445,16 @@ export default function App() {
                     exit={{ height: 0, opacity: 0 }}
                     className="overflow-hidden pl-4 space-y-1 mt-1"
                   >
-                    <NavItem icon={<Briefcase className="w-4 h-4" />} label="Master Toolbox" active={activeTab === 'master-toolbox'} onClick={() => handleNavClick('master-toolbox')} collapsed={false} />
-                    <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Master Inventory" active={activeTab === 'master-inventory'} onClick={() => handleNavClick('master-inventory')} collapsed={false} />
-                    <NavItem icon={<Layers className="w-4 h-4" />} label="Detail Toolbox" active={activeTab === 'master-detail-toolbox'} onClick={() => handleNavClick('master-detail-toolbox')} collapsed={false} />
+                    <NavItem key="master-toolbox" icon={<Briefcase className="w-4 h-4" />} label="Master Toolbox" active={activeTab === 'master-toolbox'} onClick={() => handleNavClick('master-toolbox')} collapsed={false} />
+                    <NavItem key="master-inventory" icon={<ClipboardList className="w-4 h-4" />} label="Master Inventory" active={activeTab === 'master-inventory'} onClick={() => handleNavClick('master-inventory')} collapsed={false} />
+                    <NavItem key="master-detail-toolbox" icon={<Layers className="w-4 h-4" />} label="Detail Toolbox" active={activeTab === 'master-detail-toolbox'} onClick={() => handleNavClick('master-detail-toolbox')} collapsed={false} />
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
 
             <div className="pt-4 mt-4 border-t border-slate-800">
-              <NavItem icon={<Settings className="w-5 h-5" />} label="Setting" active={activeTab === 'settings'} onClick={() => handleNavClick('settings')} collapsed={!isSidebarOpen} />
+              <NavItem key="nav-settings" icon={<Settings className="w-5 h-5" />} label="Setting" active={activeTab === 'settings'} onClick={() => handleNavClick('settings')} collapsed={!isSidebarOpen} />
             </div>
           </nav>
 
@@ -1445,7 +1501,7 @@ export default function App() {
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-40">
           <div className="flex items-center gap-2 lg:gap-4">
             <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"><Menu className="w-5 h-5" /></button>
-            <h2 className="text-base lg:text-lg font-semibold text-slate-800 capitalize truncate max-w-[150px] sm:max-w-none">{activeTab.replace(/-/g, ' ')}</h2>
+            <h2 className="text-base lg:text-lg font-semibold text-slate-800 capitalize truncate max-w-[150px] sm:max-w-none">{activeTab === 'loans' ? 'Recent Loans' : activeTab.replace(/-/g, ' ')}</h2>
           </div>
           <div className="flex items-center gap-4">
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-full border border-slate-100">
@@ -1579,40 +1635,48 @@ export default function App() {
                       />
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                       <StatCard 
+                        key="stat-good"
                         title="GOOD" 
                         value={stats.good} 
                         subtitle="Kondisi Aman"
-                        accentColor="border-l-emerald-500"
-                        badgeColor="bg-emerald-50"
-                        textColor="text-emerald-600"
+                        accentColor="border-l-green-500"
+                        badgeColor="bg-green-50"
+                        textColor="text-green-600"
                       />
                       <StatCard 
+                        key="stat-bad"
                         title="BAD" 
                         value={stats.bad} 
                         subtitle="Butuh Perbaikan"
-                        accentColor="border-l-amber-500"
-                        badgeColor="bg-amber-50"
-                        textColor="text-amber-600"
+                        accentColor="border-l-yellow-500"
+                        badgeColor="bg-yellow-50"
+                        textColor="text-yellow-600"
                       />
                       <StatCard 
+                        key="stat-broken"
                         title="BROKEN" 
                         value={stats.broken} 
-                        subtitle="Rusak Parah / Hilang"
+                        subtitle="Tidak Layak"
                         accentColor="border-l-red-500"
                         badgeColor="bg-red-50"
                         textColor="text-red-600"
                       />
                       <StatCard 
+                        key="stat-na"
                         title="N/A" 
                         value={stats.na} 
-                        subtitle="Tidak Tersedia"
-                        accentColor="border-l-slate-500"
-                        badgeColor="bg-slate-50"
-                        textColor="text-slate-600"
+                        subtitle="Tidak Ada"
+                        accentColor="border-l-blue-500"
+                        badgeColor="bg-blue-50"
+                        textColor="text-blue-600"
                       />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <StatCard 
+                        key="stat-order"
                         title="ORDER TOOL" 
                         value={stats.orderCount} 
                         subtitle="Sedang Dipesan"
@@ -1621,6 +1685,7 @@ export default function App() {
                         textColor="text-indigo-600"
                       />
                       <StatCard 
+                        key="stat-maint"
                         title="MAINTENANCE" 
                         value={stats.maintenance} 
                         subtitle="Under Maintenance"
@@ -1631,9 +1696,10 @@ export default function App() {
                     </div>
 
                     <div className="space-y-4">
-                      <h3 className="text-lg font-semibold text-slate-800">Quick Inspection</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <h3 className="text-lg font-semibold text-slate-800">Quick Actions</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <button 
+                          key="qa-daily-inspect"
                           onClick={() => setActiveTab('inspection-daily')}
                           className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md hover:border-indigo-200 transition-all group text-left"
                         >
@@ -1642,12 +1708,13 @@ export default function App() {
                               <Calendar className="w-6 h-6" />
                             </div>
                             <div>
-                              <p className="font-bold text-slate-800">Daily Inspection</p>
-                              <p className="text-xs text-slate-500">Inspect toolbox items</p>
+                              <p className="font-bold text-slate-800 text-sm">Daily Inspect</p>
+                              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Toolbox</p>
                             </div>
                           </div>
                         </button>
                         <button 
+                          key="qa-toolroom-inspect"
                           onClick={() => setActiveTab('inspection-toolroom')}
                           className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md hover:border-emerald-200 transition-all group text-left"
                         >
@@ -1656,8 +1723,44 @@ export default function App() {
                               <Package className="w-6 h-6" />
                             </div>
                             <div>
-                              <p className="font-bold text-slate-800">Inspection Toolroom</p>
-                              <p className="text-xs text-slate-500">Inspect inventory items</p>
+                              <p className="font-bold text-slate-800 text-sm">Toolroom Inspect</p>
+                              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Inventory</p>
+                            </div>
+                          </div>
+                        </button>
+                        <button 
+                          key="qa-add-loan"
+                          onClick={() => {
+                            setActiveTab('loans');
+                            setIsAddLoanModalOpen(true);
+                          }}
+                          className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md hover:border-blue-200 transition-all group text-left"
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                              <Plus className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <p className="font-bold text-slate-800 text-sm">Add Loan</p>
+                              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Borrow Tool</p>
+                            </div>
+                          </div>
+                        </button>
+                        <button 
+                          key="qa-add-order"
+                          onClick={() => {
+                            setActiveTab('progress-order');
+                            setIsAddOrderModalOpen(true);
+                          }}
+                          className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md hover:border-amber-200 transition-all group text-left"
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+                              <ShoppingCart className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <p className="font-bold text-slate-800 text-sm">Add Order</p>
+                              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Purchase Request</p>
                             </div>
                           </div>
                         </button>
@@ -1679,11 +1782,12 @@ export default function App() {
                               <th className="px-6 py-3 font-semibold">Shift</th>
                               <th className="px-6 py-3 font-semibold">Date</th>
                               <th className="px-6 py-3 font-semibold text-center">Status</th>
+                              <th className="px-6 py-3 font-semibold text-right">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {loans.filter(l => l.status === 'active').slice(0, 5).map((loan) => (
-                              <tr key={loan.id} className="hover:bg-slate-50 transition-colors">
+                        {sortedLoans.filter(l => l.status === 'active').slice(0, 5).map((loan, idx) => (
+                              <tr key={`loan-dash-dt-${loan.id}-${idx}`} className="hover:bg-slate-50 transition-colors">
                                 <td className="px-6 py-4">
                                   <div className="font-medium text-slate-700">{loan.toolName}</div>
                                   <div className="text-xs text-slate-400">{loan.typeSize}</div>
@@ -1693,9 +1797,18 @@ export default function App() {
                                 <td className="px-6 py-4 text-slate-500 text-sm">{loan.shift}</td>
                                 <td className="px-6 py-4 text-slate-500 text-sm">{format(parseISO(loan.borrowDate), 'MMM dd, HH:mm')}</td>
                                 <td className="px-6 py-4 text-center">
-                                  <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                  <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700 uppercase">
                                     {loan.status}
                                   </span>
+                                </td>
+                                <td className="px-6 py-4 text-right">
+                                  <button 
+                                    onClick={() => handleReturnTool(loan.id)}
+                                    className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors group"
+                                    title="Return / Close Loan"
+                                  >
+                                    <CheckCircle2 className="w-5 h-5 group-active:scale-90 transition-transform" />
+                                  </button>
                                 </td>
                               </tr>
                             ))}
@@ -1709,9 +1822,9 @@ export default function App() {
                       </div>
 
                       {/* Mobile View */}
-                      <div className="lg:hidden divide-y divide-slate-100">
-                        {loans.filter(l => l.status === 'active').slice(0, 5).map((loan) => (
-                          <div key={loan.id} className="p-4 space-y-3">
+                      <div className="divide-y divide-slate-100 lg:hidden">
+                        {sortedLoans.filter(l => l.status === 'active').slice(0, 5).map((loan, idx) => (
+                          <div key={`loan-dash-mob-${loan.id}-${idx}`} className="p-4 space-y-3">
                             <div className="flex justify-between items-start">
                               <div>
                                 <div className="font-bold text-slate-800">{loan.toolName}</div>
@@ -1752,8 +1865,24 @@ export default function App() {
                       </button>
                     </div>
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                      <div className="p-6 border-b border-slate-100">
+                      <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-slate-50/50">
                         <h3 className="text-lg font-semibold text-slate-800">Recent Loans</h3>
+                        <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
+                          {(['all', 'active', 'returned'] as const).map((status) => (
+                            <button
+                              key={status}
+                              onClick={() => setLoanStatusFilter(status)}
+                              className={cn(
+                                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all uppercase tracking-wider",
+                                loanStatusFilter === status 
+                                  ? "bg-white text-indigo-600 shadow-sm" 
+                                  : "text-slate-500 hover:text-slate-700"
+                              )}
+                            >
+                              {status}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                       
                       {/* Desktop View */}
@@ -1771,8 +1900,8 @@ export default function App() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {loans.map((loan) => (
-                              <tr key={loan.id} className="hover:bg-slate-50 transition-colors">
+                            {processedLoans.map((loan, idx) => (
+                              <tr key={`loan-all-dt-${loan.id}-${idx}`} className="hover:bg-slate-50 transition-colors">
                                 <td className="px-6 py-4">
                                   <div className="font-medium text-slate-700">{loan.toolName}</div>
                                   <div className="text-xs text-slate-400">{loan.typeSize}</div>
@@ -1782,10 +1911,13 @@ export default function App() {
                                 <td className="px-6 py-4 text-slate-500 text-sm">{loan.shift}</td>
                                 <td className="px-6 py-4 text-slate-500 text-sm">{format(parseISO(loan.borrowDate), 'MMM dd, HH:mm')}</td>
                                 <td className="px-6 py-4 text-center">
-                                  <span className={cn(
-                                    "px-2.5 py-1 rounded-full text-xs font-medium", 
-                                    loan.status === 'active' ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"
-                                  )}>
+                                  <span 
+                                    className={cn(
+                                      "px-2.5 py-1 rounded-full text-xs font-medium", 
+                                      loan.status === 'active' ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"
+                                    )}
+                                    title={loan.status === 'active' ? "Tool is currently borrowed and not yet returned" : "Tool has been returned to the toolroom"}
+                                  >
                                     {loan.status}
                                   </span>
                                 </td>
@@ -1807,8 +1939,8 @@ export default function App() {
 
                       {/* Mobile View */}
                       <div className="lg:hidden divide-y divide-slate-100">
-                        {loans.map((loan) => (
-                          <div key={loan.id} className="p-4 space-y-3">
+                        {processedLoans.map((loan, idx) => (
+                          <div key={`loan-all-mob-${loan.id}-${idx}`} className="p-4 space-y-3">
                             <div className="flex justify-between items-start">
                               <div>
                                 <div className="font-bold text-slate-800">{loan.toolName}</div>
@@ -1888,8 +2020,8 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {maintenanceLogs.map((log) => (
-                            <tr key={log.id} className="hover:bg-slate-50 transition-colors">
+                          {maintenanceLogs.map((log, idx) => (
+                            <tr key={`maint-dt-${log.id}-${idx}`} className="hover:bg-slate-50 transition-colors">
                               <td className="px-6 py-4 font-medium text-slate-700">{log.toolName}</td>
                               <td className="px-6 py-4 text-slate-500 text-sm">{format(parseISO(log.date), 'MMM dd, yyyy')}</td>
                               <td className="px-6 py-4 text-slate-600">{log.description}</td>
@@ -1921,8 +2053,8 @@ export default function App() {
 
                     {/* Mobile View */}
                     <div className="lg:hidden divide-y divide-slate-100">
-                      {maintenanceLogs.map((log) => (
-                        <div key={log.id} className="p-4 space-y-3">
+                      {maintenanceLogs.map((log, idx) => (
+                        <div key={`maint-mob-${log.id}-${idx}`} className="p-4 space-y-3">
                           <div className="flex justify-between items-start">
                             <div>
                               <div className="font-bold text-slate-800">{log.toolName}</div>
@@ -1953,20 +2085,6 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {activeTab === 'settings' && (
-                  <div className="max-w-2xl mx-auto space-y-8">
-                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 space-y-6">
-                      <h3 className="text-xl font-bold text-slate-800">General Settings</h3>
-                      <div className="space-y-4">
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-slate-500 uppercase">Company Name</label>
-                          <input className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" defaultValue="BuildMaster Construction" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 {activeTab === 'master-toolbox' && (
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className="p-6 border-b border-slate-100 flex justify-between items-center">
@@ -1975,7 +2093,7 @@ export default function App() {
                         <button 
                           onClick={() => {
                             setEditingToolboxId(null);
-                            setNewToolbox({ idToolbox: '', name: '', nrp: '', section: 'TRACK MECHANIC', badCount: 0, brokenCount: 0, naCount: 0 });
+                            setNewToolbox({ idToolbox: '', name: '', nrp: '', section: 'TRACK MECHANIC', badCount: 0, naCount: 0 });
                             setIsAddToolboxModalOpen(true);
                           }}
                           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-sm transition-all"
@@ -1993,24 +2111,24 @@ export default function App() {
                             <th className="px-6 py-3 font-semibold">Name</th>
                             <th className="px-6 py-3 font-semibold">NRP</th>
                             <th className="px-6 py-3 font-semibold">Section</th>
-                            <th className="px-6 py-3 font-semibold text-center">Condition (B/Br/NA)</th>
+                            <th className="px-6 py-3 font-semibold text-center">Condition (B/NA)</th>
                             <th className="px-6 py-3 font-semibold text-center">Last Inspection</th>
                             <th className="px-6 py-3 font-semibold text-right">Tool Count</th>
                             <th className="px-6 py-3 font-semibold text-right">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {toolboxesWithLastInspection.map((tb) => (
-                            <tr key={tb.id} className="hover:bg-slate-50 transition-colors">
+                          {toolboxesWithLastInspection.map((tb, idx) => (
+                            <tr key={`master-tb-dt-${tb.id}-${idx}`} className="hover:bg-slate-50 transition-colors">
                               <td className="px-6 py-4 font-mono text-sm text-slate-700">{tb.idToolbox}</td>
                               <td className="px-6 py-4 font-medium text-slate-700">{tb.name}</td>
                               <td className="px-6 py-4 text-slate-600">{tb.nrp}</td>
                               <td className="px-6 py-4 text-slate-600">{tb.section}</td>
                               <td className="px-6 py-4 text-center">
                                 <div className="flex justify-center gap-1 text-[10px] font-bold">
-                                  <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded" title="Bad">{tb.badCount || 0}</span>
+                                  <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded" title="Bad">{tb.badCount || 0}</span>
                                   <span className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded" title="Broken">{tb.brokenCount || 0}</span>
-                                  <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded" title="N/A">{tb.naCount || 0}</span>
+                                  <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded" title="N/A">{tb.naCount || 0}</span>
                                 </div>
                               </td>
                               <td className="px-6 py-4 text-center text-xs text-slate-500">
@@ -2059,8 +2177,8 @@ export default function App() {
 
                     {/* Mobile View */}
                     <div className="lg:hidden divide-y divide-slate-100">
-                      {toolboxesWithLastInspection.map((tb) => (
-                        <div key={tb.id} className="p-4 space-y-2">
+                      {toolboxesWithLastInspection.map((tb, idx) => (
+                        <div key={`master-tb-mob-${tb.id}-${idx}`} className="p-4 space-y-2">
                           <div className="flex justify-between items-start">
                             <div className="font-bold text-slate-800">{tb.name}</div>
                             <div className="flex items-center gap-2">
@@ -2092,11 +2210,11 @@ export default function App() {
                               <p className="text-slate-700">{tb.section}</p>
                             </div>
                             <div>
-                              <p className="text-slate-400 font-bold uppercase text-[10px]">Condition (B/Br/NA)</p>
+                              <p className="text-slate-400 font-bold uppercase text-[10px]">Condition (B/BR/NA)</p>
                               <div className="flex gap-1 text-[9px] font-bold mt-0.5">
-                                <span className="px-1 bg-orange-100 text-orange-700 rounded">{tb.badCount || 0}</span>
+                                <span className="px-1 bg-yellow-100 text-yellow-700 rounded">{tb.badCount || 0}</span>
                                 <span className="px-1 bg-red-100 text-red-700 rounded">{tb.brokenCount || 0}</span>
-                                <span className="px-1 bg-slate-100 text-slate-700 rounded">{tb.naCount || 0}</span>
+                                <span className="px-1 bg-blue-100 text-blue-700 rounded">{tb.naCount || 0}</span>
                               </div>
                             </div>
                             <div>
@@ -2130,6 +2248,16 @@ export default function App() {
                           />
                         </div>
                         <button 
+                          onClick={() => setShowDamagedInventory(!showDamagedInventory)}
+                          className={cn(
+                            "flex items-center justify-center gap-2 px-4 py-2 rounded-xl border transition-all font-medium text-sm shadow-sm min-w-[160px]",
+                            showDamagedInventory ? "bg-yellow-50 border-yellow-200 text-yellow-700 hover:bg-yellow-100" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                          )}
+                        >
+                          {showDamagedInventory ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                          {showDamagedInventory ? "Hide Damaged/NA" : "Show Damaged/NA"}
+                        </button>
+                        <button 
                           onClick={() => {
                             const latestResults = inventoryWithLastInspection.reduce((acc, item) => ({
                               ...acc,
@@ -2139,7 +2267,7 @@ export default function App() {
                           }}
                           className="flex items-center justify-center gap-2 px-4 py-2 bg-white text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 font-medium shadow-sm transition-all text-sm"
                         >
-                          <Printer className="w-4 h-4" /> Print Inventory Report
+                          <Printer className="w-4 h-4" /> Print Report
                         </button>
                         <button 
                           onClick={() => {
@@ -2171,25 +2299,33 @@ export default function App() {
                         <tbody className="divide-y divide-slate-100">
                           {inventoryWithLastInspection
                             .filter(item => 
-                              item.toolId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                              (item.toolId.toLowerCase().includes(searchQuery.toLowerCase()) ||
                               item.merk.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                              item.toolDesc.toLowerCase().includes(searchQuery.toLowerCase())
+                              item.toolDesc.toLowerCase().includes(searchQuery.toLowerCase())) &&
+                              (showDamagedInventory || !['Bad', 'Broken', 'N/A'].includes(item.lastStatus || 'Good'))
                             )
-                            .map((item) => (
-                            <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-6 py-4 font-mono text-sm text-slate-700">{item.toolId}</td>
+                            .map((item, idx) => (
+                            <tr key={`master-inv-dt-${item.id}-${idx}-${item.toolId}`} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className="font-mono text-sm text-slate-700">{item.toolId}</div>
+                                {item.lastNotes && (
+                                  <div className="mt-1 text-[10px] text-yellow-600 italic max-w-[150px] truncate" title={item.lastNotes}>
+                                    Note: {item.lastNotes}
+                                  </div>
+                                )}
+                              </td>
                               <td className="px-6 py-4 font-medium text-slate-700">{item.merk}</td>
                               <td className="px-6 py-4 text-slate-600">{item.toolDesc}</td>
                               <td className="px-6 py-4 text-slate-600">{item.typeSize}</td>
                               <td className="px-6 py-4 text-center">
                                 <span className={cn(
                                   "px-2 py-1 rounded-full text-[10px] font-bold uppercase",
-                                  item.condition === 'Bad' ? "bg-orange-100 text-orange-700" :
-                                  item.condition === 'Broken' ? "bg-red-100 text-red-700" :
-                                  item.condition === 'N/A' ? "bg-slate-100 text-slate-700" :
+                                  (item.lastStatus || 'Good') === 'Bad' ? "bg-yellow-100 text-yellow-700" :
+                                  (item.lastStatus || 'Good') === 'Broken' ? "bg-red-100 text-red-700" :
+                                  (item.lastStatus || 'Good') === 'N/A' ? "bg-blue-100 text-blue-700" :
                                   "bg-green-100 text-green-700"
                                 )}>
-                                  {item.condition || 'Good'}
+                                  {item.lastStatus || 'Good'}
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-center text-xs text-slate-500">
@@ -2205,7 +2341,7 @@ export default function App() {
                                   >
                                     <Pencil className="w-4 h-4" />
                                   </button>
-                                  {isSuperAdmin && (
+                                  {(isSuperAdmin || item.lastStatus === 'N/A') && (
                                     <button 
                                       onClick={() => handleDeleteInventoryItem(item.id)}
                                       className="p-1 text-rose-600 hover:bg-rose-50 rounded transition-colors"
@@ -2222,18 +2358,25 @@ export default function App() {
                       </table>
                     </div>
 
-                    {/* Mobile View */}
                     <div className="lg:hidden divide-y divide-slate-100">
                       {inventoryWithLastInspection
-                        .filter(item => 
-                          item.toolId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          item.merk.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          item.toolDesc.toLowerCase().includes(searchQuery.toLowerCase())
-                        )
-                        .map((item) => (
-                        <div key={item.id} className="p-4 space-y-2">
+                          .filter(item => 
+                            (item.toolId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            item.merk.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            item.toolDesc.toLowerCase().includes(searchQuery.toLowerCase())) &&
+                            (showDamagedInventory || !['Bad', 'Broken', 'N/A'].includes(item.lastStatus || 'Good'))
+                          )
+                        .map((item, idx) => (
+                        <div key={`master-inv-mob-${item.id}-${idx}`} className="p-4 space-y-2">
                           <div className="flex justify-between items-start">
-                            <div className="font-bold text-slate-800">{item.toolDesc}</div>
+                            <div>
+                              <div className="font-bold text-slate-800">{item.toolDesc}</div>
+                              {item.lastNotes && (
+                                <div className="mt-1 text-[10px] text-amber-600 italic">
+                                  Note: {item.lastNotes}
+                                </div>
+                              )}
+                            </div>
                             <div className="flex items-center gap-2">
                               <div className="font-mono text-xs text-slate-500">{item.toolId}</div>
                               <button onClick={() => handleEditInventoryItem(item)} className="p-1 text-indigo-600"><Pencil className="w-3 h-3" /></button>
@@ -2249,12 +2392,12 @@ export default function App() {
                               <p className="text-slate-400 font-bold uppercase text-[10px]">Condition</p>
                               <span className={cn(
                                 "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase",
-                                item.condition === 'Bad' ? "bg-orange-100 text-orange-700" :
-                                item.condition === 'Broken' ? "bg-red-100 text-red-700" :
-                                item.condition === 'N/A' ? "bg-slate-100 text-slate-700" :
+                                (item.lastStatus || item.condition) === 'Bad' ? "bg-yellow-100 text-yellow-700" :
+                                (item.lastStatus || item.condition) === 'Broken' ? "bg-red-100 text-red-700" :
+                                (item.lastStatus || item.condition) === 'N/A' ? "bg-blue-100 text-blue-700" :
                                 "bg-green-100 text-green-700"
                               )}>
-                                {item.condition || 'Good'}
+                                {item.lastStatus || item.condition || 'Good'}
                               </span>
                             </div>
                             <div>
@@ -2278,14 +2421,41 @@ export default function App() {
 
                 {activeTab === 'master-detail-toolbox' && (
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                      <h3 className="text-lg font-semibold text-slate-800">Master Data Detail Toolbox</h3>
-                      <button 
-                        onClick={() => setIsAddDetailToolboxModalOpen(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-sm transition-all"
-                      >
-                        <Plus className="w-4 h-4" /> Add Detail
-                      </button>
+                    <div className="p-6 border-b border-slate-100 space-y-4">
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-semibold text-slate-800">Master Data Detail Toolbox</h3>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        <div className="relative flex-1">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                          <input 
+                            type="text" 
+                            placeholder="Search items..." 
+                            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm shadow-sm"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => setShowDamagedDetails(!showDamagedDetails)}
+                            className={cn(
+                              "flex items-center justify-center gap-2 px-4 py-2 rounded-xl border transition-all font-medium text-sm shadow-sm",
+                              showDamagedDetails ? "bg-yellow-50 border-yellow-200 text-yellow-700 hover:bg-yellow-100" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                            )}
+                            title={showDamagedDetails ? "Hide Damaged/NA Items" : "Show Damaged/NA Items"}
+                          >
+                            {showDamagedDetails ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                            <span className="hidden sm:inline">{showDamagedDetails ? "Hide Damaged" : "Show Damaged/NA"}</span>
+                          </button>
+                          <button 
+                            onClick={() => setIsAddDetailToolboxModalOpen(true)}
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-sm transition-all text-sm"
+                          >
+                            <Plus className="w-4 h-4" /> Add Detail
+                          </button>
+                        </div>
+                      </div>
                     </div>
                     {/* Desktop View */}
                     <div className="hidden lg:block overflow-x-auto">
@@ -2300,11 +2470,35 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {toolboxDetails.map((detail) => (
-                            <tr key={detail.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-6 py-4 text-slate-600">{detail.merk}</td>
+                          {toolboxDetailsWithLastInspection
+                            .filter(detail => 
+                              (detail.merk.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                              detail.toolDesc.toLowerCase().includes(searchQuery.toLowerCase())) &&
+                              (showDamagedDetails || !['Bad', 'Broken', 'N/A'].includes(detail.lastStatus || 'Good'))
+                            )
+                            .map((detail, idx) => (
+                            <tr key={`mtb-det-dt-${detail.id}-${idx}`} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className="text-slate-600 font-medium">{detail.merk}</div>
+                                {detail.lastNotes && (
+                                  <div className="mt-0.5 text-[10px] text-amber-600 italic max-w-[150px] truncate" title={detail.lastNotes}>
+                                    Note: {detail.lastNotes}
+                                  </div>
+                                )}
+                              </td>
                               <td className="px-6 py-4 text-slate-600">{detail.toolDesc}</td>
                               <td className="px-6 py-4 text-slate-600">{detail.typeSize}</td>
+                              <td className="px-6 py-4 text-center">
+                                <span className={cn(
+                                  "px-2 py-1 rounded-full text-[10px] font-bold uppercase",
+                                  (detail.lastStatus || 'Good') === 'Bad' ? "bg-yellow-100 text-yellow-700" :
+                                  (detail.lastStatus || 'Good') === 'Broken' ? "bg-red-100 text-red-700" :
+                                  (detail.lastStatus || 'Good') === 'N/A' ? "bg-blue-100 text-blue-700" :
+                                  "bg-green-100 text-green-700"
+                                )}>
+                                  {detail.lastStatus || 'Good'}
+                                </span>
+                              </td>
                               <td className="px-6 py-4 text-slate-700 text-right">{detail.qty}</td>
                               <td className="px-6 py-4 text-right">
                                 <div className="flex justify-end gap-2">
@@ -2330,8 +2524,14 @@ export default function App() {
 
                     {/* Mobile View */}
                     <div className="lg:hidden divide-y divide-slate-100">
-                      {toolboxDetails.map((detail) => (
-                        <div key={detail.id} className="p-4 space-y-2">
+                      {toolboxDetails
+                        .filter(detail => 
+                          (detail.merk.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          detail.toolDesc.toLowerCase().includes(searchQuery.toLowerCase())) &&
+                          (showDamagedDetails || !['Bad', 'Broken', 'N/A'].includes(detail.condition || 'Good'))
+                        )
+                        .map((detail, idx) => (
+                        <div key={`mtb-det-mob-${detail.id}-${idx}`} className="p-4 space-y-2">
                           <div className="flex justify-between items-start">
                             <div className="font-bold text-slate-800">{detail.toolDesc}</div>
                             <div className="flex gap-1">
@@ -2399,8 +2599,8 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {progressOrders.map((order) => (
-                            <tr key={order.id} className="hover:bg-slate-50 transition-colors">
+                          {progressOrders.map((order, idx) => (
+                            <tr key={`order-dt-${order.id}-${idx}`} className="hover:bg-slate-50 transition-colors">
                               <td className="px-6 py-4 text-sm text-slate-600">{order.date}</td>
                               <td className="px-6 py-4 font-medium text-slate-700">{order.merk}</td>
                               <td className="px-6 py-4 text-slate-600">{order.toolDesc}</td>
@@ -2413,7 +2613,7 @@ export default function App() {
                                 <span className={cn(
                                   "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
                                   order.status === 'Progress' && "bg-blue-100 text-blue-700",
-                                  order.status === 'Waiting Approval' && "bg-amber-100 text-amber-700",
+                                  order.status === 'Waiting Approval' && "bg-yellow-100 text-yellow-700",
                                   order.status === 'Cancel' && "bg-red-100 text-red-700",
                                   order.status === 'Block Vendor' && "bg-slate-100 text-slate-700",
                                   order.status === 'Supply' && "bg-green-100 text-green-700"
@@ -2448,8 +2648,8 @@ export default function App() {
 
                     {/* Mobile View */}
                     <div className="lg:hidden divide-y divide-slate-100">
-                      {progressOrders.map((order) => (
-                        <div key={order.id} className="p-4 space-y-3">
+                      {progressOrders.map((order, idx) => (
+                        <div key={`order-mob-${order.id}-${idx}`} className="p-4 space-y-3">
                           <div className="flex justify-between items-start">
                             <div>
                               <div className="font-bold text-slate-800">{order.toolDesc}</div>
@@ -2458,7 +2658,7 @@ export default function App() {
                             <span className={cn(
                               "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
                               order.status === 'Progress' && "bg-blue-100 text-blue-700",
-                              order.status === 'Waiting Approval' && "bg-amber-100 text-amber-700",
+                              order.status === 'Waiting Approval' && "bg-yellow-100 text-yellow-700",
                               order.status === 'Cancel' && "bg-red-100 text-red-700",
                               order.status === 'Block Vendor' && "bg-slate-100 text-slate-700",
                               order.status === 'Supply' && "bg-green-100 text-green-700"
@@ -2525,7 +2725,7 @@ export default function App() {
                           >
                             <option value="">Choose a toolbox...</option>
                             {toolboxesWithLastInspection.map(tb => (
-                              <option key={tb.id} value={tb.id}>{tb.idToolbox} - {tb.name}</option>
+                              <option key={`opt-tb-${tb.id}`} value={tb.id}>{tb.idToolbox} - {tb.name}</option>
                             ))}
                           </select>
                         </div>
@@ -2551,21 +2751,24 @@ export default function App() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                              {toolboxDetails.map((detail) => (
-                                <tr key={detail.id} className="hover:bg-slate-50 transition-colors">
+                              {toolboxDetails.map((detail, idx) => (
+                                <tr key={`ins-tb-dt-${detail.id}-${idx}`} className="hover:bg-slate-50 transition-colors">
                                   <td className="px-6 py-4 font-medium text-slate-700">{detail.merk}</td>
                                   <td className="px-6 py-4 text-slate-600">{detail.toolDesc}</td>
                                   <td className="px-6 py-4 text-slate-500">{detail.typeSize}</td>
                                   <td className="px-6 py-4">
-                                    <div className="flex justify-center gap-2">
-                                      {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status) => (
-                                        <InspectionStatusButton 
-                                          key={status}
-                                          status={status}
-                                          current={inspectionResults[detail.id] || 'Good'}
-                                          onClick={() => setInspectionResults(prev => ({ ...prev, [detail.id]: status }))}
-                                        />
-                                      ))}
+                                    <div className="flex flex-col gap-2">
+                                      <div className="flex justify-center items-center gap-2">
+                                        {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status) => (
+                                          <div key={`ins-tb-dt-status-container-${detail.id}-${status}-${idx}`}>
+                                            <InspectionStatusButton 
+                                              status={status}
+                                              current={inspectionResults[detail.id] || 'Good'}
+                                              onClick={() => setInspectionResults(prev => ({ ...prev, [detail.id]: status }))}
+                                            />
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
                                   </td>
                                 </tr>
@@ -2576,22 +2779,23 @@ export default function App() {
 
                         {/* Mobile View */}
                         <div className="lg:hidden divide-y divide-slate-100">
-                          {toolboxDetails.map((detail) => (
-                            <div key={detail.id} className="p-4 space-y-3">
+                          {toolboxDetails.map((detail, idx) => (
+                            <div key={`ins-tb-mob-${detail.id}-${idx}`} className="p-4 space-y-3">
                               <div className="flex justify-between items-start">
                                 <div>
                                   <div className="font-bold text-slate-800">{detail.toolDesc}</div>
                                   <div className="text-xs text-slate-500">{detail.merk} - {detail.typeSize}</div>
                                 </div>
                               </div>
-                              <div className="flex flex-wrap gap-2 pt-1">
+                              <div className="flex flex-wrap items-center gap-2 pt-1">
                                 {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status) => (
-                                  <InspectionStatusButton 
-                                    key={status}
-                                    status={status}
-                                    current={inspectionResults[detail.id] || 'Good'}
-                                    onClick={() => setInspectionResults(prev => ({ ...prev, [detail.id]: status }))}
-                                  />
+                                  <div key={`ins-tb-mob-status-container-${detail.id}-${status}-${idx}`}>
+                                    <InspectionStatusButton 
+                                      status={status}
+                                      current={inspectionResults[detail.id] || 'Good'}
+                                      onClick={() => setInspectionResults(prev => ({ ...prev, [detail.id]: status }))}
+                                    />
+                                  </div>
                                 ))}
                               </div>
                             </div>
@@ -2630,21 +2834,24 @@ export default function App() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                              {inventoryWithLastInspection.map((item) => (
-                                <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                              {inventoryWithLastInspection.map((item, idx) => (
+                                <tr key={`ins-inv-dt-${item.id}-${idx}`} className="hover:bg-slate-50 transition-colors">
                                   <td className="px-6 py-4 font-mono text-sm text-slate-700">{item.toolId}</td>
                                   <td className="px-6 py-4 font-medium text-slate-700">{item.merk}</td>
                                   <td className="px-6 py-4 text-slate-600">{item.toolDesc}</td>
                                   <td className="px-6 py-4">
-                                    <div className="flex justify-center gap-2">
-                                      {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status) => (
-                                        <InspectionStatusButton 
-                                          key={status}
-                                          status={status}
-                                          current={inspectionResults[item.id] || 'Good'}
-                                          onClick={() => setInspectionResults(prev => ({ ...prev, [item.id]: status }))}
-                                        />
-                                      ))}
+                                    <div className="flex flex-col gap-2">
+                                      <div className="flex justify-center items-center gap-2">
+                                        {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status) => (
+                                          <div key={`ins-inv-dt-status-container-${item.id}-${status}-${idx}`}>
+                                            <InspectionStatusButton 
+                                              status={status}
+                                              current={inspectionResults[item.id] || 'Good'}
+                                              onClick={() => setInspectionResults(prev => ({ ...prev, [item.id]: status }))}
+                                            />
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
                                   </td>
                                 </tr>
@@ -2655,22 +2862,23 @@ export default function App() {
 
                         {/* Mobile View */}
                         <div className="lg:hidden divide-y divide-slate-100">
-                          {inventoryWithLastInspection.map((item) => (
-                            <div key={item.id} className="p-4 space-y-3">
+                          {inventoryWithLastInspection.map((item, idx) => (
+                            <div key={`ins-inv-mob-${item.id}-${idx}`} className="p-4 space-y-3">
                               <div className="flex justify-between items-start">
                                 <div>
                                   <div className="font-bold text-slate-800">{item.toolDesc}</div>
                                   <div className="text-xs text-slate-500">{item.toolId} - {item.merk}</div>
                                 </div>
                               </div>
-                              <div className="flex flex-wrap gap-2 pt-1">
+                              <div className="flex flex-wrap items-center gap-2 pt-1">
                                 {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status) => (
-                                  <InspectionStatusButton 
-                                    key={status}
-                                    status={status}
-                                    current={inspectionResults[item.id] || 'Good'}
-                                    onClick={() => setInspectionResults(prev => ({ ...prev, [item.id]: status }))}
-                                  />
+                                  <div key={`ins-inv-mob-status-container-${item.id}-${status}-${idx}`}>
+                                    <InspectionStatusButton 
+                                      status={status}
+                                      current={inspectionResults[item.id] || 'Good'}
+                                      onClick={() => setInspectionResults(prev => ({ ...prev, [item.id]: status }))}
+                                    />
+                                  </div>
                                 ))}
                               </div>
                             </div>
@@ -2844,7 +3052,7 @@ export default function App() {
                     onChange={e => setNewLoan({...newLoan, section: e.target.value})}
                   >
                     {['Track', 'Wheel Big', 'Wheel Small', 'SSE', 'Tyre', 'OVH', 'Lainnya'].map(sec => (
-                      <option key={sec} value={sec}>{sec}</option>
+                      <option key={`loan-sec-${sec}`} value={sec}>{sec}</option>
                     ))}
                   </select>
                 </div>
@@ -2920,19 +3128,15 @@ export default function App() {
                         onChange={e => setNewToolbox({...newToolbox, section: e.target.value})}
                       >
                         {['WHEEL BIG', 'WHEEL SMALL', 'TRACK MECHANIC', 'SSE MECHANIC', 'TYRE', 'OVH', 'LAINNYA'].map(sec => (
-                          <option key={sec} value={sec}>{sec}</option>
+                          <option key={`tb-sec-${sec}`} value={sec}>{sec}</option>
                         ))}
                       </select>
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-500 uppercase">Bad</label>
                     <input type="number" className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" value={newToolbox.badCount} onChange={e => setNewToolbox({...newToolbox, badCount: Number(e.target.value)})} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase">Broken</label>
-                    <input type="number" className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" value={newToolbox.brokenCount} onChange={e => setNewToolbox({...newToolbox, brokenCount: Number(e.target.value)})} />
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-500 uppercase">N/A</label>
@@ -2987,7 +3191,6 @@ export default function App() {
                     >
                       <option value="Good">Good</option>
                       <option value="Bad">Bad</option>
-                      <option value="Broken">Broken</option>
                       <option value="N/A">N/A</option>
                     </select>
                   </div>

@@ -25,6 +25,7 @@ export interface Loan {
   borrowDate: string; // Automatic date and time
   returnDate?: string;
   status: 'active' | 'returned';
+  updatedAt: string;
 }
 
 export interface MaintenanceLog {
