@@ -79,6 +79,7 @@ export const MOCK_LOANS: Loan[] = [
     shift: 'Day',
     borrowDate: '2024-03-25T08:00:00Z',
     status: 'active',
+    updatedAt: '2024-03-25T08:00:00Z',
   },
   {
     id: 'L2',
@@ -90,6 +91,7 @@ export const MOCK_LOANS: Loan[] = [
     shift: 'Night',
     borrowDate: '2024-03-10T20:00:00Z',
     status: 'returned',
+    updatedAt: '2024-03-10T20:00:00Z',
   }
 ];
 

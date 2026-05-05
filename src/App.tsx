@@ -104,6 +104,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMasterDataOpen, setIsMasterDataOpen] = useState(false);
   const [isAddLoanModalOpen, setIsAddLoanModalOpen] = useState(false);
+  const [editingLoanId, setEditingLoanId] = useState<string | null>(null);
   const [isAddToolboxModalOpen, setIsAddToolboxModalOpen] = useState(false);
   const [isAddInventoryModalOpen, setIsAddInventoryModalOpen] = useState(false);
   const [isAddDetailToolboxModalOpen, setIsAddDetailToolboxModalOpen] = useState(false);
@@ -226,7 +227,8 @@ export default function App() {
     shift: 'Day',
     toolName: '',
     typeSize: '',
-    borrowerName: ''
+    borrowerName: '',
+    borrowDate: ''
   });
 
   const [isAddMaintenanceModalOpen, setIsAddMaintenanceModalOpen] = useState(false);
@@ -638,13 +640,18 @@ export default function App() {
       borrowerName: newLoan.borrowerName || 'Unknown',
       section: newLoan.section || 'Track',
       shift: (newLoan.shift as 'Day' | 'Night') || 'Day',
-      borrowDate: new Date().toISOString(),
+      borrowDate: newLoan.borrowDate || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      status: 'active',
+      status: newLoan.status || 'active',
     };
 
     try {
-      await addDoc(collection(db, 'loans'), loanData);
+      if (editingLoanId) {
+        await updateDoc(doc(db, 'loans', editingLoanId), loanData);
+        setEditingLoanId(null);
+      } else {
+        await addDoc(collection(db, 'loans'), loanData);
+      }
       setIsAddLoanModalOpen(false);
       setNewLoan({
         status: 'active',
@@ -652,17 +659,40 @@ export default function App() {
         shift: 'Day',
         toolName: '',
         typeSize: '',
-        borrowerName: ''
+        borrowerName: '',
+        borrowDate: ''
       });
       setSuccessDialog({
         isOpen: true,
         title: 'Success',
-        message: 'Loan data has been saved successfully!',
+        message: editingLoanId ? 'Loan data has been updated successfully!' : 'Loan data has been saved successfully!',
         onConfirm: () => {}
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'loans');
     }
+  };
+
+  const handleEditLoan = (loan: Loan) => {
+    setNewLoan(loan);
+    setEditingLoanId(loan.id);
+    setIsAddLoanModalOpen(true);
+  };
+
+  const handleDeleteLoan = async (id: string) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Loan Data',
+      message: 'Are you sure you want to delete this loan record? This action cannot be undone.',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'loans', id));
+          showToast("Loan record deleted successfully!");
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, 'loans');
+        }
+      }
+    });
   };
 
   const handleAddMaintenance = async (e: React.FormEvent) => {
@@ -1732,6 +1762,16 @@ export default function App() {
                           key="qa-add-loan"
                           onClick={() => {
                             setActiveTab('loans');
+                            setEditingLoanId(null);
+                            setNewLoan({
+                              status: 'active',
+                              section: 'Track',
+                              shift: 'Day',
+                              toolName: '',
+                              typeSize: '',
+                              borrowerName: '',
+                              borrowDate: new Date().toISOString()
+                            });
                             setIsAddLoanModalOpen(true);
                           }}
                           className="w-full p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md hover:border-blue-200 transition-all group text-left"
@@ -1802,13 +1842,22 @@ export default function App() {
                                   </span>
                                 </td>
                                 <td className="px-6 py-4 text-right">
-                                  <button 
-                                    onClick={() => handleReturnTool(loan.id)}
-                                    className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors group"
-                                    title="Return / Close Loan"
-                                  >
-                                    <CheckCircle2 className="w-5 h-5 group-active:scale-90 transition-transform" />
-                                  </button>
+                                  <div className="flex justify-end gap-2 items-center">
+                                    <button 
+                                      onClick={() => handleEditLoan(loan)}
+                                      className="p-2 text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors group"
+                                      title="Edit Loan"
+                                    >
+                                      <Pencil className="w-5 h-5 group-active:scale-95 transition-transform" />
+                                    </button>
+                                    <button 
+                                      onClick={() => handleReturnTool(loan.id)}
+                                      className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors group"
+                                      title="Return / Close Loan"
+                                    >
+                                      <CheckCircle2 className="w-5 h-5 group-active:scale-90 transition-transform" />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -1844,6 +1893,20 @@ export default function App() {
                                 <p className="text-slate-700">{format(parseISO(loan.borrowDate), 'MMM dd, HH:mm')}</p>
                               </div>
                             </div>
+                            <div className="flex gap-2 pt-1 border-t border-slate-50 mt-2">
+                              <button 
+                                onClick={() => handleEditLoan(loan)}
+                                className="flex-1 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg font-bold text-[10px] uppercase hover:bg-indigo-100 transition-colors flex items-center justify-center gap-1"
+                              >
+                                <Pencil className="w-3 h-3" /> Edit
+                              </button>
+                              <button 
+                                onClick={() => handleReturnTool(loan.id)}
+                                className="flex-1 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg font-bold text-[10px] uppercase hover:bg-emerald-100 transition-colors flex items-center justify-center gap-1"
+                              >
+                                <CheckCircle2 className="w-3 h-3" /> Return
+                              </button>
+                            </div>
                           </div>
                         ))}
                         {loans.filter(l => l.status === 'active').length === 0 && (
@@ -1855,15 +1918,27 @@ export default function App() {
                 )}
                 {activeTab === 'loans' && (
                   <div className="space-y-6">
-                    <div className="flex justify-between items-center">
-                      <h3 className="text-lg font-semibold text-slate-800">Loan Management</h3>
-                      <button 
-                        onClick={() => setIsAddLoanModalOpen(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-sm transition-all"
-                      >
-                        <Plus className="w-4 h-4" /> Add Loan
-                      </button>
-                    </div>
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-semibold text-slate-800">Loan Management</h3>
+                        <button 
+                          onClick={() => {
+                            setEditingLoanId(null);
+                            setNewLoan({
+                              status: 'active',
+                              section: 'Track',
+                              shift: 'Day',
+                              toolName: '',
+                              typeSize: '',
+                              borrowerName: '',
+                              borrowDate: new Date().toISOString()
+                            });
+                            setIsAddLoanModalOpen(true);
+                          }}
+                          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-sm transition-all"
+                        >
+                          <Plus className="w-4 h-4" /> Add Loan
+                        </button>
+                      </div>
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                       <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-slate-50/50">
                         <h3 className="text-lg font-semibold text-slate-800">Recent Loans</h3>
@@ -1922,14 +1997,30 @@ export default function App() {
                                   </span>
                                 </td>
                                 <td className="px-6 py-4 text-right">
-                                  {loan.status === 'active' && (
+                                  <div className="flex justify-end gap-2 items-center">
+                                    {loan.status === 'active' && (
+                                      <button 
+                                        onClick={() => handleReturnTool(loan.id)}
+                                        className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors mr-2"
+                                      >
+                                        Return Tool
+                                      </button>
+                                    )}
                                     <button 
-                                      onClick={() => handleReturnTool(loan.id)}
-                                      className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+                                      onClick={() => handleEditLoan(loan)}
+                                      className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                      title="Edit Loan"
                                     >
-                                      Return Tool
+                                      <Pencil className="w-4 h-4" />
                                     </button>
-                                  )}
+                                    <button 
+                                      onClick={() => handleDeleteLoan(loan.id)}
+                                      className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                      title="Delete Loan"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -1971,14 +2062,28 @@ export default function App() {
                                 <p className="text-slate-700">{format(parseISO(loan.borrowDate), 'MMM dd, HH:mm')}</p>
                               </div>
                             </div>
-                            {loan.status === 'active' && (
+                            <div className="flex gap-2 pt-1">
+                              {loan.status === 'active' && (
+                                <button 
+                                  onClick={() => handleReturnTool(loan.id)}
+                                  className="flex-1 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors"
+                                >
+                                  Return Tool
+                                </button>
+                              )}
                               <button 
-                                onClick={() => handleReturnTool(loan.id)}
-                                className="w-full py-2 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors"
+                                onClick={() => handleEditLoan(loan)}
+                                className="p-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors flex-none"
                               >
-                                Return Tool
+                                <Pencil className="w-4 h-4" />
                               </button>
-                            )}
+                              <button 
+                                onClick={() => handleDeleteLoan(loan.id)}
+                                className="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors flex-none"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -3029,10 +3134,23 @@ export default function App() {
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
               <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                <h3 className="text-xl font-bold text-slate-800">Add New Loan</h3>
+                <h3 className="text-xl font-bold text-slate-800">{editingLoanId ? 'Edit Loan' : 'Add New Loan'}</h3>
                 <button onClick={() => setIsAddLoanModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-lg"><X className="w-5 h-5" /></button>
               </div>
               <form onSubmit={handleAddLoan} className="p-6 space-y-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Borrow Date & Time</label>
+                  <input 
+                    type="datetime-local"
+                    required 
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={newLoan.borrowDate ? new Date(newLoan.borrowDate).toLocaleString('sv-SE').replace(' ', 'T').slice(0, 16) : ''}
+                    onChange={e => {
+                      const selectedDate = new Date(e.target.value);
+                      setNewLoan({...newLoan, borrowDate: selectedDate.toISOString()});
+                    }}
+                  />
+                </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 uppercase">Name</label>
                   <input 
@@ -3092,7 +3210,9 @@ export default function App() {
                 </div>
                 <div className="pt-4 flex gap-3">
                   <button type="button" onClick={() => setIsAddLoanModalOpen(false)} className="flex-1 py-3 px-4 bg-slate-50 text-slate-600 rounded-xl font-bold hover:bg-slate-100 transition-colors">Cancel</button>
-                  <button type="submit" className="flex-1 py-3 px-4 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">Create Loan</button>
+                  <button type="submit" className="flex-1 py-3 px-4 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
+                    {editingLoanId ? 'Update Loan' : 'Create Loan'}
+                  </button>
                 </div>
               </form>
             </motion.div>
