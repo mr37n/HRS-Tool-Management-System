@@ -100,6 +100,8 @@ export default function App() {
   const [progressOrders, setProgressOrders] = useState<ProgressOrder[]>([]);
   
   const [loanStatusFilter, setLoanStatusFilter] = useState<'all' | 'active' | 'returned'>('all');
+  const [loanSectionFilter, setLoanSectionFilter] = useState('all');
+  const [orderStatusFilter, setOrderStatusFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMasterDataOpen, setIsMasterDataOpen] = useState(false);
@@ -285,8 +287,25 @@ export default function App() {
       list = list.filter(loan => loan.status === loanStatusFilter);
     }
 
+    // Apply section filter
+    if (loanSectionFilter !== 'all') {
+      list = list.filter(loan => loan.section === loanSectionFilter);
+    }
+
     return list;
-  }, [sortedLoans, loanStatusFilter]);
+  }, [sortedLoans, loanStatusFilter, loanSectionFilter]);
+
+  const processedOrders = useMemo(() => {
+    let list = [...progressOrders];
+    
+    // Apply status filter
+    if (orderStatusFilter !== 'all') {
+      list = list.filter(order => order.status === orderStatusFilter);
+    }
+
+    // Apply sorting (by date desc)
+    return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [progressOrders, orderStatusFilter]);
 
   const [newOrder, setNewOrder] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -1941,7 +1960,24 @@ export default function App() {
                       </div>
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                       <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-slate-50/50">
-                        <h3 className="text-lg font-semibold text-slate-800">Recent Loans</h3>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                          <h3 className="text-lg font-semibold text-slate-800">Recent Loans</h3>
+                          <select 
+                            className="text-xs font-bold bg-white border border-slate-200 rounded-xl px-3 py-1.5 outline-none focus:ring-2 focus:ring-indigo-500 text-slate-600"
+                            value={loanSectionFilter}
+                            onChange={(e) => setLoanSectionFilter(e.target.value)}
+                          >
+                            <option value="all">ALL SECTIONS</option>
+                            <option value="Track">TRACK</option>
+                            <option value="Wheel Big">WHEEL BIG</option>
+                            <option value="Wheel Small">WHEEL SMALL</option>
+                            <option value="SSE">SSE</option>
+                            <option value="Tyre">TYRE</option>
+                            <option value="OVH">OVH</option>
+                            <option value="Planner">PLANNER</option>
+                            <option value="Lainnya">LAINNYA</option>
+                          </select>
+                        </div>
                         <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
                           {(['all', 'active', 'returned'] as const).map((status) => (
                             <button
@@ -2676,11 +2712,28 @@ export default function App() {
 
                 {activeTab === 'progress-order' && (
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                      <h3 className="text-lg font-semibold text-slate-800">Order Tool</h3>
+                    <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                        <h3 className="text-lg font-semibold text-slate-800">Order Tool</h3>
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Filter Status:</label>
+                          <select 
+                            className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 outline-none focus:ring-2 focus:ring-indigo-500 text-slate-600"
+                            value={orderStatusFilter}
+                            onChange={(e) => setOrderStatusFilter(e.target.value)}
+                          >
+                            <option value="all">ALL STATUS</option>
+                            <option value="Progress">Progress</option>
+                            <option value="Waiting Approval">Waiting Approval</option>
+                            <option value="Cancel">Cancel</option>
+                            <option value="Block Vendor">Block Vendor</option>
+                            <option value="Supply">Supply</option>
+                          </select>
+                        </div>
+                      </div>
                       <button 
                         onClick={() => setIsAddOrderModalOpen(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-sm transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium shadow-sm transition-all text-sm"
                       >
                         <Plus className="w-4 h-4" /> Add Order
                       </button>
@@ -2704,7 +2757,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {progressOrders.map((order, idx) => (
+                          {processedOrders.map((order, idx) => (
                             <tr key={`order-dt-${order.id}-${idx}`} className="hover:bg-slate-50 transition-colors">
                               <td className="px-6 py-4 text-sm text-slate-600">{order.date}</td>
                               <td className="px-6 py-4 font-medium text-slate-700">{order.merk}</td>
@@ -2753,7 +2806,7 @@ export default function App() {
 
                     {/* Mobile View */}
                     <div className="lg:hidden divide-y divide-slate-100">
-                      {progressOrders.map((order, idx) => (
+                      {processedOrders.map((order, idx) => (
                         <div key={`order-mob-${order.id}-${idx}`} className="p-4 space-y-3">
                           <div className="flex justify-between items-start">
                             <div>
