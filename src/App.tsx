@@ -102,6 +102,7 @@ export default function App() {
   const [loanStatusFilter, setLoanStatusFilter] = useState<'all' | 'active' | 'returned'>('all');
   const [loanSectionFilter, setLoanSectionFilter] = useState('all');
   const [orderStatusFilter, setOrderStatusFilter] = useState('all');
+  const [toolboxDetailsSortOrder, setToolboxDetailsSortOrder] = useState<'asc' | 'desc'>('asc');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMasterDataOpen, setIsMasterDataOpen] = useState(false);
@@ -145,63 +146,77 @@ export default function App() {
 
   const cleanupDuplicates = async () => {
     if (!isSuperAdmin) return;
-    showToast("Cleaning up duplicates...");
     
-    try {
-      // 1. Cleanup Inventory Items (by toolId)
-      const invSnapshot = await getDocs(collection(db, 'inventoryItems'));
-      const invMap = new Map();
-      const invDeletes: string[] = [];
-      
-      invSnapshot.docs.forEach(doc => {
-        const data = doc.data();
-        const key = data.toolId;
-        if (invMap.has(key)) {
-          invDeletes.push(doc.id);
-        } else {
-          invMap.set(key, doc.id);
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Cleanup Duplicates',
+      message: 'This will remove duplicate entries from Inventory, Toolboxes, and local Tool Details. Are you sure?',
+      onConfirm: async () => {
+        try {
+          showToast("Cleaning up duplicates...");
+          
+          // 1. Cleanup Inventory Items (by toolId)
+          const invSnapshot = await getDocs(collection(db, 'inventoryItems'));
+          const invMap = new Map();
+          const invDeletes: string[] = [];
+          
+          invSnapshot.docs.forEach(doc => {
+            const data = doc.data();
+            const key = data.toolId?.trim();
+            if (!key) return; // Skip items without valid toolId
+            
+            if (invMap.has(key)) {
+              invDeletes.push(doc.id);
+            } else {
+              invMap.set(key, doc.id);
+            }
+          });
+          
+          for (const id of invDeletes) {
+            await deleteDoc(doc(db, 'inventoryItems', id));
+          }
+
+          // 2. Cleanup Toolboxes (by idToolbox)
+          const tbSnapshot = await getDocs(collection(db, 'toolboxes'));
+          const tbMap = new Map();
+          const tbDeletes: string[] = [];
+          
+          tbSnapshot.docs.forEach(doc => {
+            const data = doc.data();
+            const key = data.idToolbox?.trim();
+            if (!key) return; // Skip items without valid idToolbox
+            
+            if (tbMap.has(key)) {
+              tbDeletes.push(doc.id);
+            } else {
+              tbMap.set(key, doc.id);
+            }
+          });
+          
+          for (const id of tbDeletes) {
+            await deleteDoc(doc(db, 'toolboxes', id));
+          }
+
+          // 3. Cleanup local Toolbox Details (by toolDesc + typeSize)
+          const detailMap = new Map();
+          const uniqueDetails = toolboxDetails.filter(detail => {
+            const key = `${detail.toolDesc?.trim()}|${detail.typeSize?.trim()}`;
+            if (!detail.toolDesc?.trim()) return true; // Keep items with empty desc to avoid data loss
+            
+            if (detailMap.has(key)) return false;
+            detailMap.set(key, true);
+            return true;
+          });
+          
+          const removedDetailsCount = toolboxDetails.length - uniqueDetails.length;
+          setToolboxDetails(uniqueDetails);
+
+          showToast(`Cleanup complete! Removed ${invDeletes.length} inventory items, ${tbDeletes.length} toolboxes, and ${removedDetailsCount} detail items.`);
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, 'cleanup');
         }
-      });
-      
-      for (const id of invDeletes) {
-        await deleteDoc(doc(db, 'inventoryItems', id));
       }
-
-      // 2. Cleanup Toolboxes (by idToolbox)
-      const tbSnapshot = await getDocs(collection(db, 'toolboxes'));
-      const tbMap = new Map();
-      const tbDeletes: string[] = [];
-      
-      tbSnapshot.docs.forEach(doc => {
-        const data = doc.data();
-        const key = data.idToolbox;
-        if (tbMap.has(key)) {
-          tbDeletes.push(doc.id);
-        } else {
-          tbMap.set(key, doc.id);
-        }
-      });
-      
-      for (const id of tbDeletes) {
-        await deleteDoc(doc(db, 'toolboxes', id));
-      }
-
-      // 3. Cleanup local Toolbox Details (by toolDesc + typeSize)
-      const detailMap = new Map();
-      const uniqueDetails = toolboxDetails.filter(detail => {
-        const key = `${detail.toolDesc}|${detail.typeSize}`;
-        if (detailMap.has(key)) return false;
-        detailMap.set(key, true);
-        return true;
-      });
-      
-      const removedDetailsCount = toolboxDetails.length - uniqueDetails.length;
-      setToolboxDetails(uniqueDetails);
-
-      showToast(`Cleanup complete! Removed ${invDeletes.length} inventory items, ${tbDeletes.length} toolboxes, and ${removedDetailsCount} detail items.`);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'cleanup');
-    }
+    });
   };
 
   const handleIdLogin = async (e: React.FormEvent) => {
@@ -610,7 +625,7 @@ export default function App() {
   }, [toolboxes, dailyInspections]);
 
   const [showDamagedInventory, setShowDamagedInventory] = useState(false);
-  const [showDamagedDetails, setShowDamagedDetails] = useState(false);
+  const [showDamagedDetails, setShowDamagedDetails] = useState(true);
 
   const inventoryWithLastInspection = useMemo(() => {
     return inventoryItems.map(item => {
@@ -647,8 +662,11 @@ export default function App() {
         lastStatus: lastInspectionItem?.status || 'Good',
         lastNotes: lastInspectionItem?.notes || ''
       };
+    }).sort((a, b) => {
+      const comparison = a.toolDesc.localeCompare(b.toolDesc, undefined, { sensitivity: 'base' });
+      return toolboxDetailsSortOrder === 'asc' ? comparison : -comparison;
     });
-  }, [toolboxDetails, dailyInspections]);
+  }, [toolboxDetails, dailyInspections, selectedToolboxId, toolboxDetailsSortOrder]);
 
   const handleAddLoan = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1979,9 +1997,9 @@ export default function App() {
                           </select>
                         </div>
                         <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
-                          {(['all', 'active', 'returned'] as const).map((status) => (
+                          {(['all', 'active', 'returned'] as const).map((status, sIdx) => (
                             <button
-                              key={status}
+                              key={`loan-filter-${status}-${sIdx}`}
                               onClick={() => setLoanStatusFilter(status)}
                               className={cn(
                                 "px-3 py-1.5 rounded-lg text-xs font-bold transition-all uppercase tracking-wider",
@@ -2578,6 +2596,14 @@ export default function App() {
                           />
                         </div>
                         <div className="flex gap-2">
+                          <select 
+                            className="text-xs font-bold bg-white border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 text-slate-600 shadow-sm"
+                            value={toolboxDetailsSortOrder}
+                            onChange={(e) => setToolboxDetailsSortOrder(e.target.value as 'asc' | 'desc')}
+                          >
+                            <option value="asc">SORT: A-Z</option>
+                            <option value="desc">SORT: Z-A</option>
+                          </select>
                           <button 
                             onClick={() => setShowDamagedDetails(!showDamagedDetails)}
                             className={cn(
@@ -2665,16 +2691,23 @@ export default function App() {
 
                     {/* Mobile View */}
                     <div className="lg:hidden divide-y divide-slate-100">
-                      {toolboxDetails
+                      {toolboxDetailsWithLastInspection
                         .filter(detail => 
                           (detail.merk.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           detail.toolDesc.toLowerCase().includes(searchQuery.toLowerCase())) &&
-                          (showDamagedDetails || !['Bad', 'Broken', 'N/A'].includes(detail.condition || 'Good'))
+                          (showDamagedDetails || !['Bad', 'Broken', 'N/A'].includes(detail.lastStatus || 'Good'))
                         )
-                        .map((detail, idx) => (
-                        <div key={`mtb-det-mob-${detail.id}-${idx}`} className="p-4 space-y-2">
+                        .map((detail, dIdx) => (
+                        <div key={`mtb-det-mob-${detail.id}-${dIdx}`} className="p-4 space-y-2">
                           <div className="flex justify-between items-start">
-                            <div className="font-bold text-slate-800">{detail.toolDesc}</div>
+                            <div>
+                              <div className="font-bold text-slate-800">{detail.toolDesc}</div>
+                              {detail.lastNotes && (
+                                <div className="mt-1 text-[10px] text-amber-600 italic">
+                                  Note: {detail.lastNotes}
+                                </div>
+                              )}
+                            </div>
                             <div className="flex gap-1">
                               <button 
                                 onClick={() => handleEditDetailToolbox(detail)}
@@ -2699,10 +2732,22 @@ export default function App() {
                               <p className="text-slate-400 font-bold uppercase text-[10px]">PN/Size/Type</p>
                               <p className="text-slate-700">{detail.typeSize}</p>
                             </div>
-                          </div>
-                          <div className="pt-2 flex justify-between items-center border-t border-slate-50">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">Quantity</span>
-                            <span className="text-sm font-bold text-slate-700">{detail.qty}</span>
+                            <div>
+                              <p className="text-slate-400 font-bold uppercase text-[10px]">Condition</p>
+                              <span className={cn(
+                                "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase",
+                                (detail.lastStatus || 'Good') === 'Bad' ? "bg-yellow-100 text-yellow-700" :
+                                (detail.lastStatus || 'Good') === 'Broken' ? "bg-red-100 text-red-700" :
+                                (detail.lastStatus || 'Good') === 'N/A' ? "bg-blue-100 text-blue-700" :
+                                "bg-green-100 text-green-700"
+                              )}>
+                                {detail.lastStatus || 'Good'}
+                              </span>
+                            </div>
+                            <div>
+                              <p className="text-slate-400 font-bold uppercase text-[10px]">Quantity</p>
+                              <p className="text-sm font-bold text-slate-700">{detail.qty}</p>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -2917,8 +2962,8 @@ export default function App() {
                                   <td className="px-6 py-4">
                                     <div className="flex flex-col gap-2">
                                       <div className="flex justify-center items-center gap-2">
-                                        {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status) => (
-                                          <div key={`ins-tb-dt-status-container-${detail.id}-${status}-${idx}`}>
+                                        {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status, sIdx) => (
+                                          <div key={`ins-tb-dt-stat-${detail.id}-${status}-${sIdx}`}>
                                             <InspectionStatusButton 
                                               status={status}
                                               current={inspectionResults[detail.id] || 'Good'}
@@ -2946,8 +2991,8 @@ export default function App() {
                                 </div>
                               </div>
                               <div className="flex flex-wrap items-center gap-2 pt-1">
-                                {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status) => (
-                                  <div key={`ins-tb-mob-status-container-${detail.id}-${status}-${idx}`}>
+                                {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status, sIdx) => (
+                                  <div key={`ins-tb-mob-stat-${detail.id}-${status}-${sIdx}`}>
                                     <InspectionStatusButton 
                                       status={status}
                                       current={inspectionResults[detail.id] || 'Good'}
@@ -3000,8 +3045,8 @@ export default function App() {
                                   <td className="px-6 py-4">
                                     <div className="flex flex-col gap-2">
                                       <div className="flex justify-center items-center gap-2">
-                                        {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status) => (
-                                          <div key={`ins-inv-dt-status-container-${item.id}-${status}-${idx}`}>
+                                        {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status, sIdx) => (
+                                          <div key={`ins-inv-dt-stat-${item.id}-${status}-${sIdx}`}>
                                             <InspectionStatusButton 
                                               status={status}
                                               current={inspectionResults[item.id] || 'Good'}
@@ -3029,8 +3074,8 @@ export default function App() {
                                 </div>
                               </div>
                               <div className="flex flex-wrap items-center gap-2 pt-1">
-                                {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status) => (
-                                  <div key={`ins-inv-mob-status-container-${item.id}-${status}-${idx}`}>
+                                {(['Good', 'Bad', 'Broken', 'N/A'] as InspectionStatus[]).map((status, sIdx) => (
+                                  <div key={`ins-inv-mob-stat-${item.id}-${status}-${sIdx}`}>
                                     <InspectionStatusButton 
                                       status={status}
                                       current={inspectionResults[item.id] || 'Good'}
@@ -3222,8 +3267,8 @@ export default function App() {
                     value={newLoan.section || 'Track'}
                     onChange={e => setNewLoan({...newLoan, section: e.target.value})}
                   >
-                    {['Track', 'Wheel Big', 'Wheel Small', 'SSE', 'Tyre', 'OVH', 'Lainnya'].map(sec => (
-                      <option key={`loan-sec-${sec}`} value={sec}>{sec}</option>
+                    {['Track', 'Wheel Big', 'Wheel Small', 'SSE', 'Tyre', 'OVH', 'Planner', 'Lainnya'].map((sec, sIdx) => (
+                      <option key={`loan-sec-opt-${sec}-${sIdx}`} value={sec}>{sec}</option>
                     ))}
                   </select>
                 </div>
@@ -3300,8 +3345,8 @@ export default function App() {
                         value={newToolbox.section}
                         onChange={e => setNewToolbox({...newToolbox, section: e.target.value})}
                       >
-                        {['WHEEL BIG', 'WHEEL SMALL', 'TRACK MECHANIC', 'SSE MECHANIC', 'TYRE', 'OVH', 'LAINNYA'].map(sec => (
-                          <option key={`tb-sec-${sec}`} value={sec}>{sec}</option>
+                        {['WHEEL BIG', 'WHEEL SMALL', 'TRACK MECHANIC', 'SSE MECHANIC', 'TYRE', 'OVH', 'LAINNYA'].map((sec, sIdx) => (
+                          <option key={`tb-add-sec-${sec}-${sIdx}`} value={sec}>{sec}</option>
                         ))}
                       </select>
                   </div>
