@@ -51,6 +51,7 @@ import {
   Printer,
   FileText,
   Pencil,
+  RotateCcw,
   Trash2,
   Eye,
   EyeOff
@@ -819,6 +820,41 @@ export default function App() {
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'loans/return');
     }
+  };
+
+  const handleReactivateLoan = async (loanId: string) => {
+    const loan = loans.find(l => l.id === loanId);
+    if (!loan || loan.status === 'active') return;
+
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Re-activate Loan',
+      message: 'Are you sure you want to change this loan status back to Active? This will reduce the quantity in inventory if applicable.',
+      onConfirm: async () => {
+        try {
+          // Update loan status
+          await updateDoc(doc(db, 'loans', loanId), {
+            status: 'active',
+            returnDate: null,
+            updatedAt: new Date().toISOString()
+          });
+
+          // Update inventory quantity if toolId exists
+          if (loan.toolId) {
+            const item = inventoryItems.find(i => i.id === loan.toolId);
+            if (item && item.qty > 0) {
+              await updateDoc(doc(db, 'inventoryItems', item.id), {
+                qty: item.qty - 1
+              });
+            }
+          }
+          
+          showToast("Loan re-activated successfully!");
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, 'loans/reactivate');
+        }
+      }
+    });
   };
 
   const handleAddToolbox = async (e: React.FormEvent) => {
@@ -2052,12 +2088,20 @@ export default function App() {
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                   <div className="flex justify-end gap-2 items-center">
-                                    {loan.status === 'active' && (
+                                    {loan.status === 'active' ? (
                                       <button 
                                         onClick={() => handleReturnTool(loan.id)}
                                         className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors mr-2"
                                       >
                                         Return Tool
+                                      </button>
+                                    ) : (
+                                      <button 
+                                        onClick={() => handleReactivateLoan(loan.id)}
+                                        className="text-xs font-bold text-amber-600 hover:text-amber-800 transition-colors mr-2 flex items-center gap-1"
+                                        title="Change back to Active"
+                                      >
+                                        <RotateCcw className="w-3 h-3" /> Re-activate
                                       </button>
                                     )}
                                     <button 
@@ -2117,12 +2161,19 @@ export default function App() {
                               </div>
                             </div>
                             <div className="flex gap-2 pt-1">
-                              {loan.status === 'active' && (
+                              {loan.status === 'active' ? (
                                 <button 
                                   onClick={() => handleReturnTool(loan.id)}
                                   className="flex-1 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors"
                                 >
                                   Return Tool
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => handleReactivateLoan(loan.id)}
+                                  className="flex-1 py-2 bg-amber-50 text-amber-600 rounded-lg text-xs font-bold hover:bg-amber-100 transition-colors flex items-center justify-center gap-1"
+                                >
+                                  <RotateCcw className="w-3 h-3" /> Re-activate
                                 </button>
                               )}
                               <button 
